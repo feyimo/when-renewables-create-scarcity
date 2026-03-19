@@ -277,29 +277,65 @@ fig2b.update_layout(
 apply_base_layout(fig2b, height=360)
 c2b.plotly_chart(fig2b, use_container_width=True)
 
-afrr_weekly = afrr_f.copy()
-afrr_weekly["week"] = afrr_weekly["delivery_week_start"].dt.to_period("W").dt.start_time
-afrr_weekly = (afrr_weekly
-               .groupby(["week", "direction"])[["offered_mw", "awarded_mw"]]
-               .sum()
-               .reset_index())
-afrr_weekly["oversubscription_ratio"] = afrr_weekly["offered_mw"] / afrr_weekly["awarded_mw"]
+# aFRR price spread: aFRR+ minus aFRR– per time block
+# Pivot to get positive and negative side by side, then calculate spread
+afrr_spread = afrr_f.pivot_table(
+    index=["tender_date", "delivery_week_start"],
+    columns="direction",
+    values="clearing_price_eur_mw_h",
+    aggfunc="mean",
+).reset_index()
 
-fig2c = px.bar(
-    afrr_weekly, x="week", y="oversubscription_ratio",
-    color="direction",
-    color_discrete_map={"positive": TEAL, "negative": AMBER},
-    barmode="group",
-    title="Weekly bid oversubscription ratio (offered / awarded capacity)",
-    labels={
-        "oversubscription_ratio": "Oversubscription ratio",
-        "week": "Delivery week",
-        "direction": "",
-    },
-)
-apply_base_layout(fig2c, height=300)
-fig2c.update_layout(legend_title_text="")
-st.plotly_chart(fig2c, use_container_width=True)
+afrr_spread.columns.name = None
+
+if "positive" in afrr_spread.columns and "negative" in afrr_spread.columns:
+    afrr_spread["spread"] = afrr_spread["positive"] - afrr_spread["negative"]
+    afrr_spread = afrr_spread.dropna(subset=["spread"])
+
+    # Rolling average to smooth the noise
+    afrr_spread = afrr_spread.sort_values("delivery_week_start")
+    afrr_spread["spread_30d"] = afrr_spread["spread"].rolling(30, min_periods=1).mean()
+
+    fig2c = go.Figure()
+    fig2c.add_trace(go.Scatter(
+        x=afrr_spread["delivery_week_start"],
+        y=afrr_spread["spread"],
+        name="aFRR+ minus aFRR– price",
+        mode="lines",
+        line=dict(color=GREY_LINE, width=1),
+        hovertemplate="%{x|%d %b %Y}<br>Spread: €%{y:.2f}/MW/h<extra></extra>",
+    ))
+    fig2c.add_trace(go.Scatter(
+        x=afrr_spread["delivery_week_start"],
+        y=afrr_spread["spread_30d"],
+        name="30-period rolling avg",
+        mode="lines",
+        line=dict(color=TEAL, width=2.5),
+        hovertemplate="%{x|%d %b %Y}<br>30-period avg: €%{y:.2f}/MW/h<extra></extra>",
+    ))
+    # Zero reference line
+    fig2c.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color=AMBER,
+        line_width=1.5,
+        annotation_text="Parity (aFRR+ = aFRR–)",
+        annotation_position="top left",
+        annotation_font=dict(color=AMBER, size=11),
+    )
+    fig2c.update_layout(
+        title="aFRR price spread: upward minus downward regulation (€/MW/h)",
+        xaxis_title="Delivery date",
+        yaxis_title="Price spread (€/MW/h)",
+    )
+    apply_base_layout(fig2c, height=320)
+    st.plotly_chart(fig2c, use_container_width=True)
+
+    st.caption(
+        "When the spread is positive, upward flexibility (aFRR+) commands a premium over downward — "
+        "a signal that thermal generation headroom is tight and dispatchable upward capacity is scarce. "
+        "Spikes above zero are the highest-value moments for a VPP with upward dispatch capability."
+    )
 
 st.markdown("---")
 
