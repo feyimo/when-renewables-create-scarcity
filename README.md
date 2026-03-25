@@ -1,6 +1,6 @@
 # When Renewables Create Scarcity: Identifying High-Value Windows for VPP Operators
 
-> Use this as the GitHub README.md, the full technical write-up for anyone who wants to go deep.
+
 
 ## The Question
 
